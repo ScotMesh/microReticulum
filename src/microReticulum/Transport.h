@@ -456,6 +456,8 @@ namespace RNS {
 		static void _record_neighbor_proof(const Bytes& next_hop);
 		static void _scan_neighbor_stats();
 		static bool _dispatch_neighbor_probe(const Bytes& neighbor_hash);
+		// Probes requested while jobs() runs; sent as soon as the pass ends.
+		static std::vector<Bytes> _deferred_neighbor_probes;
 		static void _validate_neighbor(const Bytes& neighbor_hash);
 		static void _invalidate_neighbor(const Bytes& neighbor_hash);
 		static void _neighbor_probe_delivered(const PacketReceipt& receipt, const Bytes& neighbor_hash);

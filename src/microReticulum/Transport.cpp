@@ -1047,6 +1047,17 @@ TRACEF("path_request_conditions=%u", path_request_conditions);
 		packet.send();
 	}
 
+#if RNS_NEIGHBOR_PROBING
+	// Neighbour probes requested during the pass (see _dispatch_neighbor_probe)
+	if (!_deferred_neighbor_probes.empty()) {
+		std::vector<Bytes> probes;
+		probes.swap(_deferred_neighbor_probes);
+		for (const Bytes& neighbor_hash : probes) {
+			_dispatch_neighbor_probe(neighbor_hash);
+		}
+	}
+#endif
+
 	// Queue link-related path requests into the bounded discovery PR queue
 	// for throttled transmission via handle_disovery_path_requests().
 	if (!path_requests.empty()) {
@@ -5894,8 +5905,22 @@ TRACEF("Transport::write_path_table: buffer size %lu bytes", Persistence::_buffe
 // probe_destination. The receiver side already exists when peers run
 // with probe_destination_enabled() — we just send a Packet and listen
 // for its proof via std::function handlers that capture neighbor_hash.
+/*static*/ std::vector<Bytes> Transport::_deferred_neighbor_probes;
+
 /*static*/ bool Transport::_dispatch_neighbor_probe(const Bytes& neighbor_hash) {
 	TRACEF("Probing neighbor %s", neighbor_hash.toHex().c_str());
+
+	// Sending from inside jobs() would deadlock: outbound() waits for
+	// _jobs_running to clear, on this same loop, so it never returns. Queue
+	// the probe instead; jobs() sends it as soon as the pass ends, the same
+	// way it already defers announce retransmissions.
+	if (_jobs_running) {
+		if (std::find(_deferred_neighbor_probes.begin(), _deferred_neighbor_probes.end(), neighbor_hash) == _deferred_neighbor_probes.end()) {
+			_deferred_neighbor_probes.push_back(neighbor_hash);
+		}
+		DEBUGF("Neighbor probe: %s deferred until jobs finish", neighbor_hash.toHex().c_str());
+		return true;
+	}
 	Identity neighbor_identity = Identity::recall(neighbor_hash);
 	if (!neighbor_identity) {
 		++_probes_skipped;
