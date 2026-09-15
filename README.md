@@ -1,3 +1,24 @@
+![ScotMesh Reticulum](https://raw.githubusercontent.com/ScotMesh/branding/main/networks/reticulum/readme-header.png)
+
+# microReticulum — ScotMesh fork
+
+> **This is ScotMesh's fork** of [attermann/microReticulum](https://github.com/attermann/microReticulum).
+> It is the Reticulum stack inside [ScotMesh/microReticulum_Firmware](https://github.com/ScotMesh/microReticulum_Firmware),
+> the firmware we build and flash from **[rnode.scotmesh.net](https://rnode.scotmesh.net)**. Fixes land here first,
+> and the firmware pins a commit of this fork. Report problems with ScotMesh builds to us, not upstream.
+> Everything else is attermann's work and follows upstream.
+
+## How this fork differs from upstream
+
+| Area | Upstream (attermann) | This fork (ScotMesh) |
+|---|---|---|
+| **Neighbour-probe freeze** | Neighbour probes are sent from inside `Transport::jobs()`, and `Transport::outbound()` waits for jobs to finish on the same loop, so a microcontroller node freezes until the 60 s watchdog restarts it (SenseCAP P1, every 15-50 minutes). | Probes requested during a jobs pass are queued and sent once the pass ends, the same way announce retransmissions already are. |
+| **Watchdog during path-table walks** | With the path table in the microStore store, a full walk reads every entry back from flash and unpacks its announce, about 160 ms an entry on an nRF52. `_validate_neighbor` walking a full table outlasted the 60 s watchdog and restarted the node. | The watchdog is reset per entry in every full walk: `_validate_neighbor`, `_invalidate_neighbor`, the remote path listing and `remove_blackholed_paths`, as `read_path_table` already does. |
+
+Everything below this line is the upstream README, kept as-is.
+
+---
+
 > [!IMPORTANT]
 > **The directory structure in this library has changed!**
 > Please note that as of version 0.4.0 the directory structure in this library has changed.
