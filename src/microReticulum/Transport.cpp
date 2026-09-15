@@ -73,6 +73,14 @@ using namespace RNS::Persistence;
 #define RNS_PR_TAGS_MAX	 32
 #endif
 
+// Discovery path request tags only need to catch copies of the same request
+// that are still flooding the mesh. Python RNS keeps up to 32000 of them; on an
+// MCU the tags live in the container pool, so they also age out: the tag set
+// rotates every interval, and a tag is forgotten 1-2 intervals after it arrived.
+#ifndef RNS_PR_TAGS_ROTATE_INTERVAL
+#define RNS_PR_TAGS_ROTATE_INTERVAL 300.0
+#endif
+
 #ifndef RNS_SAME_INTERFACE_PATH_REQUESTS
 #define RNS_SAME_INTERFACE_PATH_REQUESTS 1
 #endif
@@ -174,6 +182,7 @@ using namespace RNS::Persistence;
 // CBA ACCUMULATES
 // CBA MCU
 /*static*/ uint16_t Transport::_max_pr_tags				= RNS_PR_TAGS_MAX;
+/*static*/ double Transport::_pr_tags_last_rotated		= 0.0;
 
 // CBA
 // CBA ACCUMULATES
@@ -258,6 +267,7 @@ DestinationEntry empty_destination_entry;
 		_receipts_last_checked = OS::time();
 		_announces_last_checked = OS::time();
 		_tables_last_culled = OS::time();
+		_pr_tags_last_rotated = OS::time();
 		_traffic_last_checked = OS::time();
 		_blackhole_last_checked = OS::time();
 		_last_saved = OS::time();
@@ -700,6 +710,13 @@ TRACEF("announce_destination: %s", announce_destination.hash().toHex().c_str());
 
 			// Cull the path request tags list if it has reached its max size
 			// CBA Culling no longer necessary since switch to GenerationalSet<>
+			// The size cap alone lets a quiet mesh fill the set over hours
+			// (about 10 tags/hour here, 65 bytes each), pinning small
+			// long-lived blocks across the heap pool. Age tags out as well.
+			if (OS::time() > (_pr_tags_last_rotated + RNS_PR_TAGS_ROTATE_INTERVAL)) {
+				_discovery_pr_tags.rotate();
+				_pr_tags_last_rotated = OS::time();
+			}
 
 			if (OS::time() > (_tables_last_culled + _tables_cull_interval)) {
 

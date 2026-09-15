@@ -130,6 +130,14 @@ namespace RNS { namespace Utilities {
 		}
 		size_type max_size() const { return _max_size; }
 
+		// Age out entries: _active becomes _previous and the old _previous is
+		// dropped. Called on a timer, every entry is gone after two calls, so
+		// the set is bounded by time as well as by max_size.
+		void rotate() {
+			_previous = std::move(_active);
+			_active.clear();
+		}
+
 		// --- Modifiers ---
 		std::pair<iterator, bool> insert(const T& value) {
 			auto pit = _previous.find(value);

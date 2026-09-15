@@ -648,6 +648,7 @@ namespace RNS {
 		static bool _saving_path_table;
 		static uint16_t _hashlist_maxsize;
 		static uint16_t _max_pr_tags;
+		static double _pr_tags_last_rotated;
 
 		// CBA
 		static uint16_t _path_table_maxsize;
