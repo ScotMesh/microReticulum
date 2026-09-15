@@ -4195,6 +4195,7 @@ static void remote_path_pack_rate_entry(MsgPack::Packer& p,
 
 			size_t match_count = 0;
 			for (const auto& path : _new_path_table) {
+				OS::reset_watchdog();  // see _validate_neighbor
 				if (req.dest_hash.size() > 0 && path.key != req.dest_hash) continue;
 				if (req.max_hops_present && path.value._hops > req.max_hops) continue;
 #if RNS_BLOCK_UNRESPONSIVE_ANNOUNCE
@@ -4215,6 +4216,7 @@ static void remote_path_pack_rate_entry(MsgPack::Packer& p,
 */
 			match_count = 0;
 			for (const auto& path : _new_path_table) {
+				OS::reset_watchdog();  // see _validate_neighbor
 				if (req.dest_hash.size() > 0 && path.key != req.dest_hash) continue;
 				if (req.max_hops_present && path.value._hops > req.max_hops) continue;
 #if RNS_BLOCK_UNRESPONSIVE_ANNOUNCE
@@ -4848,6 +4850,7 @@ TRACEF("announce_packet hops: %u", announce_packet.hops());
 	std::vector<Bytes> drop_destinations;
 	try {
 		for (const auto& path : _new_path_table) {
+			OS::reset_watchdog();  // see _validate_neighbor
 			Bytes destination_hash = path.key;
 			Identity associated = Identity::recall(destination_hash);
 			if (associated && is_blackholed(associated.hash())) {
@@ -5993,6 +5996,10 @@ TRACEF("Transport::write_path_table: buffer size %lu bytes", Persistence::_buffe
 	uint32_t marked = 0;
 	uint32_t promoted = 0;  // transitions from UNRESPONSIVE -> RESPONSIVE
 	for (const auto& path : _new_path_table) {
+		// Every entry is read back from flash and its announce unpacked, which
+		// on an nRF52 takes long enough that a full table outlasts the 60 s
+		// watchdog. Feed it per entry, as read_path_table does.
+		OS::reset_watchdog();
 		if (path.value._received_from == neighbor_hash) {
 			// Peek at the current state to detect actual transitions.
 			uint8_t prior = STATE_UNKNOWN;
@@ -6030,6 +6037,7 @@ TRACEF("Transport::write_path_table: buffer size %lu bytes", Persistence::_buffe
 	uint32_t marked = 0;
 	uint32_t demoted = 0;  // transitions from non-UNRESPONSIVE -> UNRESPONSIVE
 	for (const auto& path : _new_path_table) {
+		OS::reset_watchdog();  // see _validate_neighbor
 		if (path.value._received_from == neighbor_hash) {
 			uint8_t prior = STATE_UNKNOWN;
 			auto sit = _path_states.find(path.key);
