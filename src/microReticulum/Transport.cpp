@@ -4210,17 +4210,26 @@ static void remote_path_pack_rate_entry(MsgPack::Packer& p,
 			// but leaving this as-is for now since we don't currently ahve the ability to stream the entire path
 			// list (nor do we likely want to on resource-constrained devices) so leaving this as a no-op for now.
 
+			// First pass only counts, so decode just the hops of each stored
+			// entry instead of the whole entry and its announce packet.
 			size_t match_count = 0;
-			for (const auto& path : _new_path_table) {
-				OS::reset_watchdog();  // see _validate_neighbor
-				if (req.dest_hash.size() > 0 && path.key != req.dest_hash) continue;
-				if (req.max_hops_present && path.value._hops > req.max_hops) continue;
+			{
+				Bytes received_from;
+				uint8_t hops = 0;
+				for (auto it = _path_store.begin(); it != _path_store.end(); ++it) {
+					OS::reset_watchdog();
+					const auto& raw = *it;
+					if (!microStore::Codec<DestinationEntry>::decode_route(raw.value, hops, received_from)) continue;
+					Bytes destination_hash(raw.key);
+					if (req.dest_hash.size() > 0 && destination_hash != req.dest_hash) continue;
+					if (req.max_hops_present && hops > req.max_hops) continue;
 #if RNS_BLOCK_UNRESPONSIVE_ANNOUNCE
-				// DIVERGENCE: not advertising unresponsive paths
-				if (path_is_unresponsive(path.key)) continue;
+					// DIVERGENCE: not advertising unresponsive paths
+					if (path_is_unresponsive(destination_hash)) continue;
 #endif
-				match_count++;
-				if (match_count >= 100) break;
+					match_count++;
+					if (match_count >= 100) break;
+				}
 			}
 			p.packArraySize(match_count);
 /*
@@ -4233,7 +4242,7 @@ static void remote_path_pack_rate_entry(MsgPack::Packer& p,
 */
 			match_count = 0;
 			for (const auto& path : _new_path_table) {
-				OS::reset_watchdog();  // see _validate_neighbor
+				OS::reset_watchdog();  // a full walk can outlast the watchdog
 				if (req.dest_hash.size() > 0 && path.key != req.dest_hash) continue;
 				if (req.max_hops_present && path.value._hops > req.max_hops) continue;
 #if RNS_BLOCK_UNRESPONSIVE_ANNOUNCE
@@ -4866,9 +4875,11 @@ TRACEF("announce_packet hops: %u", announce_packet.hops());
 
 	std::vector<Bytes> drop_destinations;
 	try {
-		for (const auto& path : _new_path_table) {
-			OS::reset_watchdog();  // see _validate_neighbor
-			Bytes destination_hash = path.key;
+		// Keys only: the store iterator's operator-> gives the key from the
+		// in-memory index without reading the entry from storage.
+		for (auto it = _path_store.begin(); it != _path_store.end(); ++it) {
+			OS::reset_watchdog();
+			Bytes destination_hash(it->key);
 			Identity associated = Identity::recall(destination_hash);
 			if (associated && is_blackholed(associated.hash())) {
 				drop_destinations.push_back(destination_hash);
@@ -6006,75 +6017,104 @@ TRACEF("Transport::write_path_table: buffer size %lu bytes", Persistence::_buffe
 	return true;
 }
 
-// DIVERGENCE: Reset the suspicion window and mark every path going
-// through this neighbor as responsive so any prior demotion is undone.
+// DIVERGENCE: Reset the suspicion window and undo any prior demotion of
+// paths going through this neighbor.
+//
+// Only UNRESPONSIVE states have any effect (path_is_unresponsive() is the
+// sole consumer), so walk _path_states rather than the path table: it holds
+// a handful of entries, while the path table is read back from flash one
+// entry at a time. The old full-table walk took ~60 s on a SenseCAP P1 with
+// 445 paths and inserted a RESPONSIVE state for every path via the
+// neighbor, both of which the nRF52 cannot afford.
 /*static*/ void Transport::_validate_neighbor(const Bytes& neighbor_hash) {
 	TRACEF("Validating neighbor %s", neighbor_hash.toHex().c_str());
-	uint32_t marked = 0;
+	if (!_new_path_table) return;
+	const uint64_t started = OS::ltime();
+	uint32_t checked = 0;
 	uint32_t promoted = 0;  // transitions from UNRESPONSIVE -> RESPONSIVE
-	for (const auto& path : _new_path_table) {
-		// Every entry is read back from flash and its announce unpacked, which
-		// on an nRF52 takes long enough that a full table outlasts the 60 s
-		// watchdog. Feed it per entry, as read_path_table does.
-		OS::reset_watchdog();
-		if (path.value._received_from == neighbor_hash) {
-			// Peek at the current state to detect actual transitions.
-			uint8_t prior = STATE_UNKNOWN;
-			auto sit = _path_states.find(path.key);
-			if (sit != _path_states.end()) prior = sit->second;
-			if (mark_path_responsive(path.key)) {
-				++marked;
-				if (prior == STATE_UNRESPONSIVE) {
-					++promoted;
-					VERBOSEF("Neighbor probe: path %s via %s promoted UNRESPONSIVE -> RESPONSIVE",
-					         path.key.toHex().c_str(), neighbor_hash.toHex().c_str());
-				}
-				else {
-					TRACEF("Neighbor probe: path %s via %s marked RESPONSIVE (prior state %u)",
-					       path.key.toHex().c_str(), neighbor_hash.toHex().c_str(), (unsigned)prior);
-				}
-			}
+	try {
+		std::vector<uint8_t> raw;
+		Bytes received_from;
+		uint8_t hops = 0;
+		for (auto& [destination_hash, state] : _path_states) {
+			if (state != STATE_UNRESPONSIVE) continue;
+			OS::reset_watchdog();
+			++checked;
+			raw.clear();
+			if (!_path_store.get(microStore::Codec<Bytes>::encode(destination_hash), raw)) continue;
+			if (!microStore::Codec<DestinationEntry>::decode_route(raw, hops, received_from)) continue;
+			if (received_from != neighbor_hash) continue;
+			// Existing node: updating it in place allocates nothing.
+			state = STATE_RESPONSIVE;
+			++_paths_responsive;
+			++promoted;
+			VERBOSEF("Neighbor probe: path %s via %s promoted UNRESPONSIVE -> RESPONSIVE",
+			         destination_hash.toHex().c_str(), neighbor_hash.toHex().c_str());
 		}
 	}
-	if (promoted > 0) {
-		NOTICEF("Neighbor probe: %s validated; %u of %u paths promoted from UNRESPONSIVE",
-		        neighbor_hash.toHex().c_str(), promoted, marked);
+	catch (const std::bad_alloc&) {
+		ERRORF("Neighbor probe: bad_alloc - OUT OF MEMORY validating %s", neighbor_hash.toHex().c_str());
 	}
-	else {
-		INFOF("Neighbor probe: %s validated; %u paths confirmed RESPONSIVE",
-		      neighbor_hash.toHex().c_str(), marked);
+	catch (const std::exception& e) {
+		ERRORF("Neighbor probe: failed validating %s: %s", neighbor_hash.toHex().c_str(), e.what());
 	}
+	INFOF("Neighbor probe: %s validated; %u of %u unresponsive paths promoted in %lu ms",
+	      neighbor_hash.toHex().c_str(), promoted, checked, (unsigned long)(OS::ltime() - started));
 }
 
 // DIVERGENCE: Demote every path going through this neighbor; existing
 // announce-replacement logic will swap them back in when (and if) a
 // fresh announce arrives over a working route.
+//
+// This does need the whole path table. Read each stored entry raw and
+// decode only hops/received_from: building and unpacking the announce
+// Packet for every entry is what made the walk slow and briefly needed
+// several hundred bytes of pool per entry.
 /*static*/ void Transport::_invalidate_neighbor(const Bytes& neighbor_hash) {
 	TRACEF("Invalidating neighbor %s", neighbor_hash.toHex().c_str());
+	if (!_new_path_table) return;
+	const uint64_t started = OS::ltime();
 	uint32_t marked = 0;
 	uint32_t demoted = 0;  // transitions from non-UNRESPONSIVE -> UNRESPONSIVE
-	for (const auto& path : _new_path_table) {
-		OS::reset_watchdog();  // see _validate_neighbor
-		if (path.value._received_from == neighbor_hash) {
-			uint8_t prior = STATE_UNKNOWN;
-			auto sit = _path_states.find(path.key);
-			if (sit != _path_states.end()) prior = sit->second;
-			if (mark_path_unresponsive(path.key)) {
-				++marked;
-				if (prior != STATE_UNRESPONSIVE) {
-					++demoted;
-					VERBOSEF("Neighbor probe: path %s via %s demoted %s -> UNRESPONSIVE",
-					         path.key.toHex().c_str(), neighbor_hash.toHex().c_str(),
-					         (prior == STATE_RESPONSIVE) ? "RESPONSIVE" : "UNKNOWN");
+	try {
+		Bytes received_from;
+		uint8_t hops = 0;
+		for (auto it = _path_store.begin(); it != _path_store.end(); ++it) {
+			OS::reset_watchdog();
+			const auto& raw = *it;  // loads this entry's value from storage
+			if (!microStore::Codec<DestinationEntry>::decode_route(raw.value, hops, received_from)) continue;
+			if (received_from != neighbor_hash) continue;
+			Bytes destination_hash(raw.key);
+			++marked;
+			auto sit = _path_states.find(destination_hash);
+			if (sit != _path_states.end()) {
+				if (sit->second == STATE_UNRESPONSIVE) {
+					TRACEF("Neighbor probe: path %s via %s already UNRESPONSIVE", destination_hash.toHex().c_str(), neighbor_hash.toHex().c_str());
+					continue;
 				}
-				else {
-					TRACEF("Neighbor probe: path %s via %s already UNRESPONSIVE", path.key.toHex().c_str(), neighbor_hash.toHex().c_str());
-				}
+				VERBOSEF("Neighbor probe: path %s via %s demoted %s -> UNRESPONSIVE",
+				         destination_hash.toHex().c_str(), neighbor_hash.toHex().c_str(),
+				         (sit->second == STATE_RESPONSIVE) ? "RESPONSIVE" : "UNKNOWN");
+				sit->second = STATE_UNRESPONSIVE;
 			}
+			else {
+				VERBOSEF("Neighbor probe: path %s via %s demoted UNKNOWN -> UNRESPONSIVE",
+				         destination_hash.toHex().c_str(), neighbor_hash.toHex().c_str());
+				_path_states[destination_hash] = STATE_UNRESPONSIVE;
+			}
+			++_paths_unresponsive;
+			++demoted;
 		}
 	}
-	NOTICEF("Neighbor probe: %s invalidated; %u of %u paths newly demoted to UNRESPONSIVE",
-	        neighbor_hash.toHex().c_str(), demoted, marked);
+	catch (const std::bad_alloc&) {
+		// Paths demoted so far stay demoted; the rest keep their state.
+		ERRORF("Neighbor probe: bad_alloc - OUT OF MEMORY invalidating %s after %u paths", neighbor_hash.toHex().c_str(), demoted);
+	}
+	catch (const std::exception& e) {
+		ERRORF("Neighbor probe: failed invalidating %s: %s", neighbor_hash.toHex().c_str(), e.what());
+	}
+	NOTICEF("Neighbor probe: %s invalidated; %u of %u paths newly demoted to UNRESPONSIVE in %lu ms",
+	        neighbor_hash.toHex().c_str(), demoted, marked, (unsigned long)(OS::ltime() - started));
 }
 
 // DIVERGENCE: probe-delivered outcome — neighbor confirmed reciprocally
