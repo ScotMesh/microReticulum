@@ -30,6 +30,8 @@
 #include <Arduino.h>
 #if defined(ESP32)
 #include "esp_task_wdt.h"
+#elif defined(ARDUINO_ARCH_NRF52) || defined(ARDUINO_NRF52_ADAFRUIT)
+#include <nrf.h>
 #endif
 #endif
 
@@ -135,6 +137,16 @@ namespace RNS { namespace Utilities {
 		inline static void reset_watchdog() {
 #if defined(ESP32)
 			esp_task_wdt_reset();
+#elif defined(ARDUINO) && (defined(ARDUINO_ARCH_NRF52) || defined(ARDUINO_NRF52_ADAFRUIT))
+			// The nRF52 WDT has no task API: the firmware starts it with reload
+			// register RR[0] enabled and feeds it once per loop(). Feed the same
+			// register here so long library walks don't trip it. Only while it
+			// runs, and only the registers the firmware enabled.
+			if (NRF_WDT->RUNSTATUS & WDT_RUNSTATUS_RUNSTATUS_Msk) {
+				for (uint8_t i = 0; i < 8; ++i) {
+					if (NRF_WDT->RREN & (1UL << i)) NRF_WDT->RR[i] = WDT_RR_RR_Reload;
+				}
+			}
 #endif
 		}
 
