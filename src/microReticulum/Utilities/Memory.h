@@ -148,6 +148,7 @@ namespace RNS { namespace Utilities {
 	#error "Unknown or invalid allocator."
 #endif
 				if (p == nullptr) {
+					++container_allocator_info.alloc_fault;
 					ERRORF("--- ContainerAllocator failed to allocate memory (%u bytes)", size);
 					throw std::bad_alloc();
 				}
