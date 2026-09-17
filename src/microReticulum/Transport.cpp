@@ -5790,7 +5790,7 @@ TRACEF("Transport::write_path_table: buffer size %lu bytes", Persistence::_buffe
 					WARNINGF("Failed to remove destination %s from path table", destination_hash.toHex().c_str());
 				}
 				++count;
-				if (_announce_table.size() <= _path_table_maxsize) {
+				if (_announce_table.size() <= _announce_table_maxsize) {
 					break;
 				}
 			}
