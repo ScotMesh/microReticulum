@@ -134,16 +134,42 @@ using namespace RNS::Persistence;
 	if (entry._announce_packet) {
 		// Announce packet is cached in packed state
 		// so we need to unpack it before accessing.
-		if (entry._announce_packet.unpack()) {
-			// We increase the hops, since reading a packet
-			// from cache is equivalent to receiving it again
-			// over an interface. It is cached with its non-
-			// increased hop-count.
-			entry._announce_packet.hops(entry._announce_packet.hops() + 1);
+		if (!entry._announce_packet.unpack()) {
+			// Out of memory or corrupt: don't hand back a packet that is
+			// still packed, callers would read unset fields from it. The
+			// entry then tests false, i.e. "no usable path".
+			entry._announce_packet = {RNS::Type::NONE};
+			return false;
 		}
+		// We increase the hops, since reading a packet
+		// from cache is equivalent to receiving it again
+		// over an interface. It is cached with its non-
+		// increased hop-count.
+		entry._announce_packet.hops(entry._announce_packet.hops() + 1);
 		// re-assign original receiving interface (if it still exists)
 		entry._announce_packet.receiving_interface(entry._receiving_interface);
 	}
 
+	return true;
+}
+
+/*static*/ bool microStore::Codec<DestinationEntry>::decode_route(const std::vector<uint8_t>& data, uint8_t& hops, Bytes& received_from)
+{
+	if (data.empty()) return false;
+
+	MsgPack::Unpacker u;
+	u.feed(data.data(), data.size());
+
+	if (!u.isArray()) return false;
+	if (u.unpackArraySize() < 7) return false;
+
+	double ignored = 0;
+	if (!u.deserialize(ignored)) return false;   // timestamp
+	if (!u.deserialize(hops)) return false;
+	if (!u.deserialize(ignored)) return false;   // expires
+
+	MsgPack::bin_t<uint8_t> b;
+	if (!u.deserialize(b)) return false;
+	received_from.assign(b.data(), b.size());
 	return true;
 }

@@ -105,5 +105,9 @@ struct Codec<RNS::Persistence::DestinationEntry>
 {
 	static std::vector<uint8_t> encode(const RNS::Persistence::DestinationEntry& entry);
 	static bool decode(const std::vector<uint8_t>& data, RNS::Persistence::DestinationEntry& entry);
+	// Decodes only hops and received_from (the fields ahead of the random
+	// blobs and announce packet), without building a Packet. For table walks
+	// that only need to know which neighbour a path goes through.
+	static bool decode_route(const std::vector<uint8_t>& data, uint8_t& hops, RNS::Bytes& received_from);
 };
 }

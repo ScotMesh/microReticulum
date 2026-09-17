@@ -47,6 +47,9 @@ using namespace RNS::Utilities;
 #ifndef RNS_ALTHEAP_POOL_BUFFER_SIZE
 	#define RNS_ALTHEAP_POOL_BUFFER_SIZE 0
 #endif
+#ifndef RNS_TLSF_CHECK_EVERY_ALLOC
+	#define RNS_TLSF_CHECK_EVERY_ALLOC 0
+#endif
 #ifndef BUFFER_FRACTION
 	#define BUFFER_FRACTION 0.8
 #endif
@@ -189,12 +192,18 @@ void tlsf_mem_walker(void* ptr, size_t size, int used, void* user)
 	}
 	void* p;
 	if (pool_info.tlsf != nullptr) {
+#if RNS_TLSF_CHECK_EVERY_ALLOC
+		// Debug only: walks every block in the pool on every allocation. With
+		// ~2300 blocks on an nRF52 that dominates the cost of anything that
+		// allocates (e.g. decoding a path table entry), so it is off by
+		// default; dump_pool_stats() still runs tlsf_check() periodically.
 		struct tlsf_stats stats;
 		memset(&stats, 0, sizeof(stats));
 		tlsf_walk_pool(tlsf_get_pool(pool_info.tlsf), tlsf_mem_walker, &stats);
 		if (tlsf_check(pool_info.tlsf) != 0) {
 			printf("--- HEAP CORRUPTION DETECTED!!!\n");
 		}
+#endif
 		//printf("--- allocating memory from tlsf (%u bytes) (%u free)\n", size, stats.free_size);
 		p = tlsf_malloc(pool_info.tlsf, size);
 		//printf("--- allocated memory from tlsf (addr=%lx) (%u bytes)\n", p, size);
@@ -239,6 +248,9 @@ void tlsf_mem_walker(void* ptr, size_t size, int used, void* user)
 	struct tlsf_stats stats;
 	memset(&stats, 0, sizeof(stats));
 	tlsf_walk_pool(tlsf_get_pool(pool_info.tlsf), tlsf_mem_walker, &stats);
+	if (tlsf_check(pool_info.tlsf) != 0) {
+		ERRORF("%sPool: HEAP CORRUPTION DETECTED", name);
+	}
 	HEADF(LOG_TRACE, "%sPool Stats", name);
 	TRACEF("  Buffer Size:     %u", pool_info.buffer_size);
 	TRACEF("  Contiguous Size: %u", pool_info.contiguous_size);
@@ -492,7 +504,9 @@ void* allocator_malloc(size_t size) {
 		Memory::default_allocator_info.max_alloc_size = size;
 	}
 #if RNS_DEFAULT_ALLOCATOR == RNS_HEAP_POOL_ALLOCATOR
-	return Memory::pool_malloc(Memory::heap_pool_info, size);
+	void* p = Memory::pool_malloc(Memory::heap_pool_info, size);
+	if (p == nullptr) ++Memory::default_allocator_info.alloc_fault;
+	return p;
 #elif RNS_DEFAULT_ALLOCATOR == RNS_PSRAM_ALLOCATOR
 #if BOARD_HAS_PSRAM != 1
 	#error "BOARD_HAS_PSRAM must be defined to use RNS_PSRAM_POOL_ALLOCATOR allocator."
