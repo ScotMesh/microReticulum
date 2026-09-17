@@ -643,6 +643,8 @@ namespace RNS {
 		static float _interface_jobs_interval;
 		static double _blackhole_last_checked;
 		static float _blackhole_check_interval;
+		static double _neighbor_last_scanned;
+		static float _neighbor_scan_interval;
 		static double _last_mgmt_announce;
 		static float _mgmt_announce_interval;
 		static bool _saving_path_table;

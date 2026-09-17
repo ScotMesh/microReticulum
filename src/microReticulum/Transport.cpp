@@ -173,6 +173,8 @@ using namespace RNS::Persistence;
 /*static*/ float Transport::_interface_jobs_interval	= 5.0;
 /*static*/ double Transport::_blackhole_last_checked	= 0.0;
 /*static*/ float Transport::_blackhole_check_interval	= 60.0;
+/*static*/ double Transport::_neighbor_last_scanned		= 0.0;
+/*static*/ float Transport::_neighbor_scan_interval		= 15.0;
 /*static*/ double Transport::_last_mgmt_announce		= 0.0;
 /*static*/ float Transport::_mgmt_announce_interval		= 7200.0;
 /*static*/ bool Transport::_saving_path_table			= false;
@@ -270,6 +272,7 @@ DestinationEntry empty_destination_entry;
 		_pr_tags_last_rotated = OS::time();
 		_traffic_last_checked = OS::time();
 		_blackhole_last_checked = OS::time();
+		_neighbor_last_scanned = OS::time();
 		_last_saved = OS::time();
 
 		// Ensure required directories exist
@@ -966,17 +969,23 @@ TRACEF("path_request_conditions=%u", path_request_conditions);
 			}
 
 #if RNS_NEIGHBOR_PROBING
-			// DIVERGENCE: passive neighbor-liveness scan — runs every
-			// jobs() tick; per-neighbor rate limits inside the scan
-			// keep probe traffic bounded. Effective only when transport
-			// is enabled, neighbor probing is on, and we ourselves are
-			// reachable as a probe responder so peers can verify us
-			// reciprocally.
+			// DIVERGENCE: passive neighbor-liveness scan. The per-neighbor
+			// rate limits inside the scan bound the probe *traffic*, but not
+			// the scan itself: running it every jobs() tick walked the whole
+			// stats map four times a second, allocating a candidate vector and
+			// a hex string per neighbor per tick. On a node with a 140 KB pool
+			// that churn fragmented the heap until a 64-byte allocation failed
+			// (soak run 7: baseline 104 KB, peak 126 KB, dead in 30 hours).
+			// Nothing the scan looks at can change faster than the 300-second
+			// suspicion and rate-limit windows, so scan on an interval like
+			// every other periodic job in this loop.
 			// CBA TODO Determine if we actually need to gate on probe_destination_enabled() here
-			if (Reticulum::transport_enabled()
+			if (OS::time() > (_neighbor_last_scanned + _neighbor_scan_interval)
+				&& Reticulum::transport_enabled()
 				&& Reticulum::neighbor_probing_enabled()
 				&& Reticulum::probe_destination_enabled())
 			{
+				_neighbor_last_scanned = OS::time();
 				try {
 					//TRACE("Neighbor probe: Scanning neighbor stats...");
 					_scan_neighbor_stats();
