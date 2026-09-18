@@ -65,7 +65,9 @@ namespace RNS { namespace Utilities {
 		}
 #else
         // return current time in milliseconds since 00:00:00, January 1, 1970 (Unix Epoch)
-		inline static uint64_t ltime() { timeval time; ::gettimeofday(&time, NULL); return (uint64_t)(time.tv_sec * 1000) + (uint64_t)(time.tv_usec / 1000); }
+		// _time_offset applies here as it does on embedded builds, so tests can
+		// move time forward past an expiry instead of waiting out a week of it.
+		inline static uint64_t ltime() { timeval time; ::gettimeofday(&time, NULL); return (uint64_t)(time.tv_sec * 1000) + (uint64_t)(time.tv_usec / 1000) + _time_offset; }
 #endif
 
 #ifdef ARDUINO
@@ -73,7 +75,7 @@ namespace RNS { namespace Utilities {
 		inline static double time() { return (double)(ltime() / 1000.0); }
 #else
         // return current time in float seconds since 00:00:00, January 1, 1970 (Unix Epoch)
-		inline static double time() { timeval time; ::gettimeofday(&time, NULL); return (double)time.tv_sec + ((double)time.tv_usec / 1000000); }
+		inline static double time() { timeval time; ::gettimeofday(&time, NULL); return (double)time.tv_sec + ((double)time.tv_usec / 1000000) + ((double)_time_offset / 1000.0); }
 #endif
 
         // sleep for specified milliseconds
