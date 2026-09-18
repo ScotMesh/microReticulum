@@ -884,9 +884,44 @@ TRACEF("path_request_conditions=%u", path_request_conditions);
 					ERRORF("jobs: failed to cull link table: %s", e.what());
 				}
 
-				// Cull the path table
-				// CBA microStore
-				// CBA Culling of path table no longer necessary since switch to microStore
+				// Cull the path table.
+				//
+				// Restores Python's Transport.jobs() path expiry, which this
+				// port lost when the table moved to microStore: the store's
+				// per-record TTL is only checked lazily on get(), so an expired
+				// record still occupies an index slot in RAM until something
+				// asks for it. _expires is already computed when the path is
+				// learned (now + AP_PATH_TIME, ROAMING_PATH_TIME or
+				// PATHFINDER_E, so a day, six hours or a week by interface
+				// mode) and persisted with the entry — until now nothing read
+				// it, leaving LRU at path_table_maxsize as the only bound.
+				//
+				// The walk is capped per pass: a full table is thousands of
+				// records on a flash-backed node, and this runs inside jobs().
+				try {
+					std::vector<Bytes> expired_paths;
+					double now = OS::time();
+					for (const auto& path : _new_path_table) {
+						OS::reset_watchdog();  // a full walk can outlast the watchdog
+						if (path.value._expires > 0 && now > path.value._expires) {
+							expired_paths.push_back(path.key);
+							if (expired_paths.size() >= MAX_PATHS_CULLED_PER_PASS) break;
+						}
+					}
+					for (const auto& destination_hash : expired_paths) {
+						DEBUGF("Removing expired path to %s", destination_hash.toHex().c_str());
+						remove_path(destination_hash);
+					}
+					if (!expired_paths.empty()) {
+						DEBUGF("Removed %u expired path(s) from path table", (unsigned)expired_paths.size());
+					}
+				}
+				catch (const std::bad_alloc&) {
+					ERROR("jobs: bad_alloc - out of memory culling path table");
+				}
+				catch (const std::exception& e) {
+					ERRORF("jobs: failed to cull path table: %s", e.what());
+				}
 
                 // Cull the pending path requests table
 				try {

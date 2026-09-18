@@ -543,6 +543,7 @@ namespace RNS { namespace Type {
 		static const uint8_t MAX_RATE_TIMESTAMPS   = RNS_RATE_TIMESTAMPS_MAX; // Maximum number of announce timestamps to keep per destination
 		static const uint8_t PERSIST_RANDOM_BLOBS  = RNS_RANDOM_BLOBS_PERSIST_MAX; // Maximum number of random blobs per destination to persist to disk
 		static const uint8_t MAX_RANDOM_BLOBS      = RNS_RANDOM_BLOBS_MAX; // Maximum number of random blobs per destination to keep in memory
+		static const uint8_t MAX_PATHS_CULLED_PER_PASS = 32; // Expired paths removed per jobs() pass, so the walk stays bounded
 
 		static const uint32_t DESTINATION_TIMEOUT = 60*60*24*7;   // Destination table entries are removed if unused for one week
 		static const uint32_t PATHFINDER_E      = 60*60*24*7; // Path expiration of one week
