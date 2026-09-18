@@ -18,6 +18,11 @@
 
 #include "tlsf/tlsf.h"
 
+// uint8_t and friends: Arduino.h drags these in on embedded builds, but a
+// native build has no such luck.
+#include <cstdint>
+#include <cstddef>
+
 #include <memory>
 
 #define RNS_HEAP_ALLOCATOR 0		 // Use HEAP for allocator

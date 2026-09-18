@@ -491,6 +491,12 @@ namespace RNS {
 		inline static void path_table_maxsize(uint16_t path_table_maxsize) { _path_table_maxsize = path_table_maxsize; _path_store.set_max_recs(_path_table_maxsize); }
 		inline static uint16_t announce_table_maxsize() { return _announce_table_maxsize; }
 		inline static void announce_table_maxsize(uint16_t announce_table_maxsize) { _announce_table_maxsize = announce_table_maxsize; }
+		// How often the neighbour-stats scan may run, and how often it has. The
+		// count is reported with the other table metrics: the scan's cost is
+		// per-pass, so the rate is the thing worth watching.
+		inline static float neighbor_scan_interval() { return _neighbor_scan_interval; }
+		inline static void neighbor_scan_interval(float interval) { _neighbor_scan_interval = interval; }
+		inline static uint32_t neighbor_scans() { return _neighbor_scans; }
 		inline static uint16_t hashlist_maxsize() { return _hashlist_maxsize; }
 		inline static void hashlist_maxsize(uint16_t hashlist_maxsize) { _hashlist_maxsize = hashlist_maxsize; _packet_hash_store.set_max_recs(hashlist_maxsize); }
 		inline static uint32_t hashlist_segment_size() { return _hashlist_segment_size; }
@@ -645,6 +651,7 @@ namespace RNS {
 		static float _blackhole_check_interval;
 		static double _neighbor_last_scanned;
 		static float _neighbor_scan_interval;
+		static uint32_t _neighbor_scans;
 		static double _last_mgmt_announce;
 		static float _mgmt_announce_interval;
 		static bool _saving_path_table;

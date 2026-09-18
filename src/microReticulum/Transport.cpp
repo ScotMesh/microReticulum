@@ -175,6 +175,7 @@ using namespace RNS::Persistence;
 /*static*/ float Transport::_blackhole_check_interval	= 60.0;
 /*static*/ double Transport::_neighbor_last_scanned		= 0.0;
 /*static*/ float Transport::_neighbor_scan_interval		= 15.0;
+/*static*/ uint32_t Transport::_neighbor_scans			= 0;
 /*static*/ double Transport::_last_mgmt_announce		= 0.0;
 /*static*/ float Transport::_mgmt_announce_interval		= 7200.0;
 /*static*/ bool Transport::_saving_path_table			= false;
@@ -5539,7 +5540,7 @@ TRACEF("Transport::write_path_table: buffer size %lu bytes", Persistence::_buffe
 	// _reverse_table
 	// _announce_table
 	// _held_announces
-	HEADF(LOG_VERBOSE, "paths: %u dsts: %u revr: %u annc: %u held: %u", _new_path_table.size(), _destinations.size(), _reverse_table.size(), _announce_table.size(), _held_announces.size());
+	HEADF(LOG_VERBOSE, "paths: %u dsts: %u revr: %u annc: %u held: %u nbrs: %u scans: %u", _new_path_table.size(), _destinations.size(), _reverse_table.size(), _announce_table.size(), _held_announces.size(), (unsigned)_neighbor_stats.size(), (unsigned)_neighbor_scans);
 
 	// _path_requests
 	// _discovery_path_requests
@@ -5910,6 +5911,7 @@ TRACEF("Transport::write_path_table: buffer size %lu bytes", Persistence::_buffe
 // if a probe dispatch (and its synchronous side-effects) touches the
 // stats map.
 /*static*/ void Transport::_scan_neighbor_stats() {
+	++_neighbor_scans;
 	if (_neighbor_stats.empty()) return;
 
 	TRACE("Performing neighbor scan");
