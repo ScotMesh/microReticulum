@@ -2523,6 +2523,16 @@ TRACEF("path_announce_emitted=%lu", path_announce_emitted);
 						else if (packet.receiving_interface().mode() == Type::Interface::MODE_ROAMING) {
 							expires = now + ROAMING_PATH_TIME;
 						}
+						else if (packet.receiving_interface().bitrate() > 0
+							&& packet.receiving_interface().bitrate() <= RADIO_BITRATE_MAX) {
+							// A LoRa mesh is the roaming case whatever the interface
+							// mode says. PATHFINDER_E's week suits a backbone of fixed
+							// peers; over the air, nodes are portable and paths change
+							// far sooner, so a week of stale entries is a week of index
+							// slots held in RAM on the node least able to spare them.
+							// Anything still reachable re-announces long before this.
+							expires = now + ROAMING_PATH_TIME;
+						}
 						else {
 							expires = now + PATHFINDER_E;
 						}

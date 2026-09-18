@@ -549,6 +549,7 @@ namespace RNS { namespace Type {
 		static const uint32_t PATHFINDER_E      = 60*60*24*7; // Path expiration of one week
 		static const uint32_t AP_PATH_TIME      = 60*60*24;   // Path expiration of one day for Access Point paths
 		static const uint32_t ROAMING_PATH_TIME = 60*60*6;    // Path expiration of 6 hours for Roaming paths
+		static const uint32_t RADIO_BITRATE_MAX = 100000;     // At or below this an interface is a radio, not a wire
 
 		static const uint16_t LOCAL_CLIENT_CACHE_MAXSIZE = 512;
 	}
